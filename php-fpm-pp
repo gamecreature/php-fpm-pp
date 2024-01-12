@@ -1,0 +1,134 @@
+#!/bin/sh
+
+# PROVIDE: php-fpm-pp
+# REQUIRE: LOGIN
+# KEYWORD: shutdown
+
+#
+# Add the following line to /etc/rc.conf to enable php-fpm-pp:
+# php_fpm_pp_enable="YES"
+#
+# Support for multiple php-fpm instances
+# Add full php-fpm config files into /usr/local/etc/php-fpm-pp.d/
+# (All .conf files there are automaticly started)
+#
+
+. /etc/rc.subr
+
+name="php_fpm_pp"
+rcvar=php_fpm_pp_enable
+
+start_precmd="php_fpm_pp_prestart"
+restart_precmd="php_fpm_pp_checkconfig"
+reload_precmd="php_fpm_pp_checkconfig"
+configtest_cmd="php_fpm_pp_checkconfig"
+
+load_rc_config "$name"
+
+: ${php_fpm_pp_enable="NO"}
+: ${php_fpm_pp_umask=""}
+: ${php_fpm_pp_flags=""}
+: ${php_fpm_pp_rc_script:="/usr/local/etc/rc.d/php-fpm-pp"}
+
+config_profile_dir="/usr/local/etc/php-fpm-pp.d"
+extra_commands="reload configtest logrotate"
+command="/usr/local/sbin/php-fpm"
+pidfile="/var/run/php-fpm.pid"
+configfile="/usr/local/etc/php-fpm.conf"
+sig_stop="QUIT"
+sig_reload="USR2"
+logrotate_cmd="php_fpm_logrotate"
+
+# Convenience function to read a profile's environment variable, or fall back to a default
+# e.x. _read_profile_var my_app pidfile '/u/my_app/shard/pids/puma.pid'
+_read_profile_var()
+{
+  profile=$1
+  var=$2
+  default=$3
+  default2=$4
+  eval value="\${php_fpm_pp_${profile}_${var}:-${default}}"
+  eval value="\${value:-${default2}}"
+  echo "${value}"
+}
+
+_build_command_args()
+{
+  echo "--fpm-config=${configfile} --pid=${pidfile} ${php_fpm_pp_flags}"
+}
+
+# If we have a profile, set up the environment for that profile
+if [ -n "$2" ]; then
+  profile="$2"
+
+  # set the rcvar for this specific profile
+  rcvar="${name}_${profile}_enable"
+  rcvar="${rcvar}"
+
+  # if the user provides a directory, we can infer some default configuration
+  pidfile="/var/run/php-fpm/${profile}.pid"
+  configfile="/usr/local/etc/php-fpm-pp.d/${profile}.conf"
+  php_fpm_pp_flags=`   _read_profile_var "${profile}" "flags"    "${php_fpm_pp_flags}"`
+
+  # enable the profile rc-flag (because there are optional)
+  profile_rcvar="${name}_${profile}_enable"
+  eval "${profile_rcvar}=\${${profile_rcvar}:-'YES'}"
+
+  command_args=`_build_command_args`
+else
+  for item in `ls $config_profile_dir/*.conf`; do
+    file=`basename $item`
+    profile=`echo "${file%.*}"`
+
+    profile_rcvar="${name}_${profile}_enable"
+    eval "${profile_rcvar}=\${${profile_rcvar}:-'YES'}"
+
+    if checkyesno ${profile_rcvar}; then
+      echo "Running ${1} on ${profile}" # via ${php_fpm_pp_rc_script}"
+      ${php_fpm_pp_rc_script} $1 $profile
+    else
+      echo "Skipping ${profile}"
+
+      # Unset the variable and then checkyesno again to print the warning
+      eval "unset ${profile_rcvar}"
+      checkyesno ${profile_rcvar}
+    fi
+   done
+   exit 0
+fi
+
+
+required_files=$configfile
+
+php_fpm_pp_logrotate() {
+        if [ -z "$rc_pid" ]; then
+                _run_rc_notrunning
+                return 1
+        fi
+        echo "Rotating logs $name."
+        kill -USR1 $rc_pid
+}
+
+php_fpm_pp_checkconfig()
+{
+        echo "Performing sanity check on php-fpm configuration:"
+	#echo "${command} ${command_args} -t"
+        eval ${command} ${command_args} -t
+}
+
+php_fpm_pp_prestart()
+{
+	php_fpm_pp_checkconfig
+	checkconfig=$?
+	if [ $checkconfig -ne 0  ]; then
+		return $checkconfig
+	fi
+
+	if [ ! -z "$php_fpm_umask"  ]; then
+		echo "Setting umask to: ${php_fpm_umask}"
+		umask $php_fpm_umask
+	fi
+}
+
+run_rc_command "$1"
+
