@@ -44,3 +44,17 @@ service php-fpm-pp stop config_name
 service php-fpm-pp configtest config_name
 ```
 
+## Pool Specific php.ini configuration
+
+To allow the tweaking of for example the opcache it is possible to supply extra
+php-fpm (ini config) flags via the /etc/rc.conf file:
+
+For example:
+
+```sh
+php_fpm_pp_pool1_flags="-d opcache.memory_consumption=128 -d opcache.max_accelerated_files=10000"
+php_fpm_pp_pool2_flags="-d opcache.memory_consumption=256 -d opcache.max_accelerated_files=20000"
+```
+
+
+
